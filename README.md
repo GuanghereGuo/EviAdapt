@@ -2,7 +2,7 @@
 #### *by: Yubo Hou, Mohamed Ragab, Yucheng Wang, Min Wu, Abdulla Alseiari, Chee-Keong Kwoh, Xiaoli Li, Zhenghua Chen*
 #### IEEE Transactions on Instrumentation and Measurement (TIM-25).
 
-This is a PyTorch implementation of this domain adaptation method for remaining useful Life prediction on time series data.
+This is a PyTorch implementation of this domain adaptation method for remaining useful life prediction on time series data.
 
 ## Abstract
 <img src="EviAdapt.png" width="1000">
