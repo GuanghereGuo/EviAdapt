@@ -38,5 +38,7 @@ If you found this work useful for you, please consider citing it.
   journal={IEEE Transactions on Instrumentation and Measurement}, 
   title={Evidential Domain Adaptation for Remaining Useful Life Prediction with Incomplete Degradation}, 
   year={2025},
+  volume={74},
+  pages={1-11},
 }
 ```
