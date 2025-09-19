@@ -45,6 +45,7 @@ backbone = 'LSTM'
 
 
 select_method = 'NO_ADAPT'
+# dataset = 'NCMAPSS'
 dataset = 'CMAPSS'
 data_path= "./data/datasets/"+dataset
 directory = f'./trained_models/{dataset}/single_domain'

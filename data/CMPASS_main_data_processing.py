@@ -362,9 +362,7 @@ def process_data2(data_dir, data_identifier,window_size, keep_p=1):
         ind = ind[0]
         testLen.append(len(ind))
         data_temp = test_01_nor[ind,:]
-        
 
-        
         if len(data_temp)<winSize:
             data_temp_a = []
             for myi in range(data_temp.shape[1]):
@@ -406,7 +404,8 @@ def process_data2(data_dir, data_identifier,window_size, keep_p=1):
     
 data_dir = './CMAPSSData/'
 winSize = 30
-keep_p=1
+# keep_p=1
+keep_p=0.6
 for data_identifier in ['FD001', 'FD002', 'FD003','FD004']:
     #train_data, valid_data, test_data, train_labels, valid_labels, test_labels = process_data(data_dir, data_identifier, winSize)
     train_data, test_data, train_labels, test_labels = process_data2(data_dir, data_identifier, winSize, keep_p)
@@ -415,8 +414,10 @@ for data_identifier in ['FD001', 'FD002', 'FD003','FD004']:
     train_data_dict, test_data_dict = {}, {}
     train_data_dict = {'samples': train_data, 'labels': train_labels}
     test_data_dict = {'samples': test_data, 'labels': test_labels}
-    torch.save(train_data_dict, '../../rul_baseline2/data/datasets/CMAPSS/train_'+data_identifier+f'_{keep_p}.pt')
-    torch.save(test_data_dict, '../../rul_baseline2/data/datasets/CMAPSS/test_'+data_identifier+f'_{keep_p}.pt')
+    # torch.save(train_data_dict, '../../rul_baseline2/data/datasets/CMAPSS/train_'+data_identifier+f'_{keep_p}.pt')
+    # torch.save(test_data_dict, '../../rul_baseline2/data/datasets/CMAPSS/test_'+data_identifier+f'_{keep_p}.pt')
+    torch.save(train_data_dict, './datasets/CMAPSS/train_'+data_identifier+f'_{keep_p}.pt')
+    torch.save(test_data_dict, './datasets/CMAPSS/test_'+data_identifier+f'_{keep_p}.pt')
     
     
     

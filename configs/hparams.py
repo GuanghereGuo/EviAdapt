@@ -9,11 +9,13 @@ class CMAPSS():
     def __init__(self):
         super(CMAPSS, self).__init__()
         self.train_params = {
-            'num_epochs': 20,
-            'batch_size': 256,
+            'num_epochs': 10,
+            # 'batch_size': 256,
+            'batch_size': 512,
             'weight_decay': 1e-4,
             'step_size': 50,
-            'lr_decay': 0, #0.5
+            # 'lr_decay': 0, #0.5
+            'lr_decay': 0.5,
             'pretrain': True,
             'save': True
 

@@ -16,7 +16,7 @@ def cross_domain_train(device, dataset, dataset_configs, hparams, backbone, data
 
     dataset_file = torch.load(os.path.join(data_path, f"train_{tgt_id}.pt"))
     tgt_dataset = Load_Dataset(dataset_file, dataset_configs)
-    tgt_train_dl = torch.utils.data.DataLoader(dataset=tgt_dataset, batch_size=hparams["batch_size"], shuffle=False, drop_last=False, num_workers=0)    
+    tgt_train_dl = torch.utils.data.DataLoader(dataset=tgt_dataset, batch_size=hparams["batch_size"], shuffle=False, drop_last=False, num_workers=32)
     tgt_trainX = tgt_dataset.x_data
     
     dataset_file = torch.load(os.path.join(data_path, f"train_{src_id}.pt"))

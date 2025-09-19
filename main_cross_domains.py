@@ -15,14 +15,12 @@ parser = argparse.ArgumentParser()
 print(torch.cuda.current_device())
 
 
-
-
 if __name__ == '__main__':
   # ========= Select the DA methods ============
   parser.add_argument('--da_method', default='EviAdapt', type=str, help='EviAdapt')
 
   # ========= Select the DATASET ==============
-  parser.add_argument('--dataset', default='CMAPSS', type=str, help='Dataset of choice: (CMAPSS - NCMAPSS)')
+  parser.add_argument('--dataset', default='NCMAPSS', type=str, help='Dataset of choice: (CMAPSS - NCMAPSS)')
 
   # ========= Select the BACKBONE ==============
   parser.add_argument('--backbone', default='LSTM', type=str, help='Backbone of choice: LSTM')
