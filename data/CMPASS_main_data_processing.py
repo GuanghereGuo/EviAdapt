@@ -404,8 +404,8 @@ def process_data2(data_dir, data_identifier,window_size, keep_p=1):
     
 data_dir = './CMAPSSData/'
 winSize = 30
-# keep_p=1
-keep_p=0.6
+keep_p=1
+# keep_p=0.6
 for data_identifier in ['FD001', 'FD002', 'FD003','FD004']:
     #train_data, valid_data, test_data, train_labels, valid_labels, test_labels = process_data(data_dir, data_identifier, winSize)
     train_data, test_data, train_labels, test_labels = process_data2(data_dir, data_identifier, winSize, keep_p)

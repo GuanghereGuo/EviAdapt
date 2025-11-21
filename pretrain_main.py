@@ -28,6 +28,7 @@ from models.models import get_backbone_class, Model
 import os
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(device)
 warnings.filterwarnings(action='ignore', category=DataConversionWarning)
 
 # Steps
