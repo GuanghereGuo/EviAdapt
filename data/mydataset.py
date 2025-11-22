@@ -37,6 +37,7 @@
 #     test_dl = DataLoader(MyDataset(testX, testY), batch_size=10, shuffle=False, drop_last=False)
 #     return train_dl, test_dl
 #
+#
 # class Load_Dataset(Dataset):
 #     def __init__(self, dataset, dataset_configs):
 #         super().__init__()
@@ -62,14 +63,12 @@
 #         elif len(x_data.shape) == 3 and x_data.shape[1] != self.num_channels:
 #             x_data = x_data.transpose(1, 2)
 #
-#
 #         if dataset_configs.permute:
 #             x_data = x_data.transpose(1, 2)
 #
 #         self.x_data = x_data.float()
 #         self.y_data = y_data.float() if y_data is not None else None
 #         self.len = x_data.shape[0]
-#
 #
 #     def __getitem__(self, index):
 #         x = self.x_data[index]
@@ -88,7 +87,7 @@
 #     dataset = Load_Dataset(dataset_file, dataset_configs)
 #     print(len(dataset))
 #     if dtype == "test":  # you don't need to shuffle or drop last batch while testing
-#         shuffle  = False
+#         shuffle = False
 #         drop_last = False
 #     else:
 #         shuffle = dataset_configs.shuffle
@@ -99,7 +98,11 @@
 #                                               batch_size=hparams["batch_size"],
 #                                               shuffle=shuffle,
 #                                               drop_last=drop_last,
-#                                               num_workers=0)
+#                                               num_workers=8,
+#                                               pin_memory=True,  # 开启锁页内存加速传输
+#                                               persistent_workers=True,
+#                                               prefetch_factor=4)  # 保持进程活跃
+#     # my add
 #
 #     return data_loader
 #
@@ -127,7 +130,8 @@
 #         return len(self.tgt_data)
 #
 #     def __getitem__(self, idx):
-#         anchor, anchor_label, anchor_cluster = self.tgt_data[idx], self.tgt_labels[idx].item(), self.tgt_cluster[idx].item()
+#         anchor, anchor_label, anchor_cluster = self.tgt_data[idx], self.tgt_labels[idx].item(), self.tgt_cluster[
+#             idx].item()
 #
 #         positive_idx = np.random.choice(self.label_to_indices[anchor_cluster])
 #
@@ -136,16 +140,25 @@
 #
 #         return anchor, positive, anchor_label, positive_label
 #
-# def stage_dataset_generator(src_data, src_labels, src_cluster, tgt_data, tgt_labels, tgt_cluster, random_flag=True, batch_size=100, shuffle=True, drop_last=False):
-#     train_dl = DataLoader(DA_StageDataset_label(src_data, src_labels, src_cluster, tgt_data, tgt_labels, tgt_cluster), batch_size=batch_size, shuffle=shuffle, drop_last=drop_last)
+#
+# def stage_dataset_generator(src_data, src_labels, src_cluster, tgt_data, tgt_labels, tgt_cluster, random_flag=True,
+#                             batch_size=100, shuffle=True, drop_last=False):
+#     train_dl = DataLoader(DA_StageDataset_label(src_data, src_labels, src_cluster, tgt_data, tgt_labels, tgt_cluster),
+#                           batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, num_workers=8,  # 开启多进程
+#                           pin_memory=True,  # 开启锁页内存
+#                           persistent_workers=True,
+#                           prefetch_factor=4)  # 保持进程活跃
+#
+#     # my add
 #
 #     return train_dl
-#
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 import numpy as np
 import os
+import random  # 引入 random 库
+
 
 class MyDataset(Dataset):
     def __init__(self, data, labels):
@@ -252,7 +265,6 @@ def data_generator(data_path, domain_id, dataset_configs, hparams, dtype):
 
 class DA_StageDataset_label(Dataset):
     def __init__(self, src_data, src_labels, src_cluster, tgt_data, tgt_labels, tgt_cluster):
-
         self.src_data = src_data
         self.src_labels = src_labels
         self.src_cluster = torch.LongTensor(src_cluster)
@@ -261,11 +273,18 @@ class DA_StageDataset_label(Dataset):
         self.tgt_cluster = torch.LongTensor(tgt_cluster)
 
         # Group data by labels
+        # OPTIMIZATION: Use dictionary of numpy arrays for faster access than lists
         self.label_to_indices = {}
-        for i, label in enumerate(src_cluster):
-            if label not in self.label_to_indices:
-                self.label_to_indices[label] = []
-            self.label_to_indices[label].append(i)
+        temp_indices = {}
+
+        # Pre-calculate indices purely in numpy/python list first
+        src_cluster_np = np.array(src_cluster)
+        unique_labels = np.unique(src_cluster_np)
+
+        for label in unique_labels:
+            # Use np.where for faster indexing
+            indices = np.where(src_cluster_np == label)[0]
+            self.label_to_indices[label] = indices
 
         print('triplet dataset:', self.label_to_indices.keys())
 
@@ -273,19 +292,27 @@ class DA_StageDataset_label(Dataset):
         return len(self.tgt_data)
 
     def __getitem__(self, idx):
-        anchor, anchor_label, anchor_cluster = self.tgt_data[idx], self.tgt_labels[idx].item(), self.tgt_cluster[
-            idx].item()
+        anchor = self.tgt_data[idx]
+        anchor_label = self.tgt_labels[idx]  # Keep as tensor
+        anchor_cluster = self.tgt_cluster[idx].item()
 
-        positive_idx = np.random.choice(self.label_to_indices[anchor_cluster])
+        # OPTIMIZATION: Faster random choice using numpy array
+        # Avoid np.random.choice overhead for single item, use random integer index
+        possible_indices = self.label_to_indices[anchor_cluster]
+        # random_idx = np.random.choice(possible_indices) # Slower
+        random_idx = possible_indices[np.random.randint(0, len(possible_indices))]
 
-        anchor, positive = self.tgt_data[idx], self.src_data[positive_idx]
-        anchor_label, positive_label = self.tgt_labels[idx], self.src_labels[positive_idx]
+        positive = self.src_data[random_idx]
+        positive_label = self.src_labels[random_idx]
 
         return anchor, positive, anchor_label, positive_label
 
 
 def stage_dataset_generator(src_data, src_labels, src_cluster, tgt_data, tgt_labels, tgt_cluster, random_flag=True,
                             batch_size=100, shuffle=True, drop_last=False):
+    # 注意：这里 num_workers=8, persistent_workers=True 是关键
+    # 如果频繁重新创建 DataLoader，persistent_workers 反而会增加销毁/重建的开销
+    # 所以在 EviAdapt.py 中必须复用这个 DataLoader
     train_dl = DataLoader(DA_StageDataset_label(src_data, src_labels, src_cluster, tgt_data, tgt_labels, tgt_cluster),
                           batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, num_workers=8,  # 开启多进程
                           pin_memory=True,  # 开启锁页内存
