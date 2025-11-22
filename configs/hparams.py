@@ -9,13 +9,14 @@ class CMAPSS():
     def __init__(self):
         super(CMAPSS, self).__init__()
         self.train_params = {
-            'num_epochs': 10,
+            'num_epochs': 20,
             # 'batch_size': 256,
-            'batch_size': 512,
-            'weight_decay': 1e-4,
-            'step_size': 50,
-            # 'lr_decay': 0, #0.5
-            'lr_decay': 0.5,
+            'batch_size': 2560,
+            'weight_decay': 5e-4,
+            # 'step_size': 50,
+            'step_size': 5,
+            #'lr_decay': 0.5,
+            'lr_decay': 0.6,
             'pretrain': True,
             'save': True
 
@@ -24,7 +25,7 @@ class CMAPSS():
             'NO_ADAPT': {'learning_rate': 1e-3, 'src_cls_loss_wt': 1, 'pretrain_epochs': 30},
             'TARGET_ONLY': {'learning_rate': 1e-3, 'trg_cls_loss_wt': 1},
             "EviAdapt": {
-                "learning_rate": 5e-5,
+                "learning_rate": 3e-5,
             },
         }
 
