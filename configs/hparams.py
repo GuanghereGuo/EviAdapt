@@ -14,7 +14,7 @@ class CMAPSS():
             'batch_size': 2560,
             'weight_decay': 9e-4,
             # 'step_size': 50,
-            'step_size': 10,
+            'step_size': 5,
             #'lr_decay': 0.5,
             'lr_decay': 0.9,
             'pretrain': True,
