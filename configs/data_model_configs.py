@@ -9,8 +9,8 @@ class CMAPSS():
         super(CMAPSS, self)
         self.source_ratio = 1
         self.target_ratio = 0.6
-        scenarios = [("FD002", "FD001")]
-        # scenarios = [("FD001", "FD002"), ("FD001", "FD003"), ("FD001", "FD004"), ("FD002", "FD001"), ("FD002", "FD003"), ("FD002", "FD004"),("FD003", "FD001"), ("FD003", "FD002"), ("FD003", "FD004"), ("FD004", "FD001"), ("FD004", "FD002"), ("FD004", "FD003")]
+        # scenarios = [("FD001", "FD003")]
+        scenarios = [("FD001", "FD002"), ("FD001", "FD003"), ("FD001", "FD004"), ("FD002", "FD001"), ("FD002", "FD003"), ("FD002", "FD004"),("FD003", "FD001"), ("FD003", "FD002"), ("FD003", "FD004"), ("FD004", "FD001"), ("FD004", "FD002"), ("FD004", "FD003")]
         self.scenarios = [(f"{pair[0]}_{self.source_ratio}", f"{pair[1]}_{self.target_ratio}") for pair in scenarios]
         self.sequence_len = 30
         self.max_rul = 130

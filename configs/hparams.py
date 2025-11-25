@@ -12,11 +12,11 @@ class CMAPSS():
             'num_epochs': 30,
             # 'batch_size': 256,
             'batch_size': 2560,
-            'weight_decay': 9e-4,
+            'weight_decay': 5e-4,
             # 'step_size': 50,
-            'step_size': 5,
+            'step_size': 10,
             #'lr_decay': 0.5,
-            'lr_decay': 0.9,
+            'lr_decay': 0.8,
             'pretrain': True,
             'save': True
 
@@ -25,6 +25,9 @@ class CMAPSS():
             'NO_ADAPT': {'learning_rate': 1e-3, 'src_cls_loss_wt': 1, 'pretrain_epochs': 30},
             'TARGET_ONLY': {'learning_rate': 1e-3, 'trg_cls_loss_wt': 1},
             "EviAdapt": {
+                "learning_rate": 3e-5,
+            },
+            "my_alg": {
                 "learning_rate": 3e-5,
             },
         }
