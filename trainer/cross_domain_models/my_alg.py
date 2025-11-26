@@ -15,48 +15,6 @@ from models.models import get_backbone_class, Model
 from trainer.train_eval import evaluate
 
 # =============================================================================
-# 1. 核心组件：阶段对齐 Loss (你提供的实现)
-# =============================================================================
-class Stage_Wise_Alignment(nn.Module):
-    def __init__(self, kernel_mul=2.0, kernel_num=5, fix_sigma=None, **kwargs):
-        super(Stage_Wise_Alignment, self).__init__()
-        self.kernel_num = kernel_num
-        self.kernel_mul = kernel_mul
-        self.fix_sigma = None
-
-    def guassian_kernel(self, source, target, kernel_mul, kernel_num, fix_sigma):
-        n_samples = int(source.size()[0]) + int(target.size()[0])
-        total = torch.cat([source, target], dim=0)
-        total0 = total.unsqueeze(0).expand(
-            int(total.size(0)), int(total.size(0)), int(total.size(1)))
-        total1 = total.unsqueeze(1).expand(
-            int(total.size(0)), int(total.size(0)), int(total.size(1)))
-        L2_distance = ((total0-total1)**2).sum(2)
-        if fix_sigma:
-            bandwidth = fix_sigma
-        else:
-            bandwidth = torch.sum(L2_distance.data) / (n_samples**2-n_samples)
-        bandwidth /= kernel_mul ** (kernel_num // 2)
-        bandwidth_list = [bandwidth * (kernel_mul**i)
-                          for i in range(kernel_num)]
-        kernel_val = [torch.exp(-L2_distance / bandwidth_temp)
-                      for bandwidth_temp in bandwidth_list]
-        return sum(kernel_val)
-
-    def forward(self, source, target):
-        # 容错处理：如果输入为空（例如某阶段没有样本），直接返回0
-        if source.size(0) == 0 or target.size(0) == 0:
-            return torch.tensor(0.0).to(source.device)
-
-        batch_size = int(source.size()[0])
-        kernels = self.guassian_kernel(
-            source, target, kernel_mul=self.kernel_mul, kernel_num=self.kernel_num, fix_sigma=self.fix_sigma)
-        XY = torch.mean(kernels[:batch_size, batch_size:])
-        YX = torch.mean(kernels[batch_size:, :batch_size])
-        loss = torch.mean( - XY - YX)
-        return loss
-
-# =============================================================================
 # 2. 辅助函数：计算模型置信度 Phi
 # =============================================================================
 def compute_model_confidence(nu, alpha, beta):
@@ -68,13 +26,253 @@ def compute_model_confidence(nu, alpha, beta):
     # 添加 epsilon 防止除零
     return 2 * nu + alpha + 1.0 / (beta + 1e-6)
 
-# =============================================================================
-# 3. 主训练函数
-# =============================================================================
+
+import torch
+import torch.nn as nn
+
+
+class SinkhornDistance(nn.Module):
+    def __init__(self, eps=0.1, max_iter=100, reduction='mean'):
+        super(SinkhornDistance, self).__init__()
+        self.eps = eps
+        self.max_iter = max_iter
+        self.reduction = reduction
+
+    def forward(self, x, y):
+        # x, y: [batch_size, feature_dim]
+        # 计算成本矩阵 C (L2 distance squared)
+        x_col = x.unsqueeze(1)
+        y_lin = y.unsqueeze(0)
+        C = torch.sum((torch.abs(x_col - y_lin)) ** 2, 2)
+
+        # 初始化对偶变量
+        u = torch.zeros_like(C[:, 0])
+        v = torch.zeros_like(C[0, :])
+
+        # Sinkhorn 迭代
+        for i in range(self.max_iter):
+            u = -self.eps * torch.logsumexp((v.unsqueeze(0) - C) / self.eps, dim=1)
+            v = -self.eps * torch.logsumexp((u.unsqueeze(1) - C) / self.eps, dim=0)
+
+        # 计算最优传输计划 P 的对数
+        # P_ij = exp((u_i + v_j - C_ij) / eps)
+        # Transport cost = sum(P * C)
+        log_P = (u.unsqueeze(1) + v.unsqueeze(0) - C) / self.eps
+        P = torch.exp(log_P)
+
+        # 防止数值不稳定导致的 NaN
+        cost = torch.sum(P * C)
+
+        if self.reduction == 'mean':
+            cost = cost / x.size(0)
+
+        return cost
+
+
+class CoralAlignment(nn.Module):
+    def __init__(self):
+        super(CoralAlignment, self).__init__()
+
+    def forward(self, source, target):
+        d = source.data.shape[1]
+        ns, nt = source.data.shape[0], target.data.shape[0]
+
+        # source covariance
+        xm = torch.mean(source, 0, keepdim=True) - source
+        xc = xm.t() @ xm / (ns - 1)
+
+        # target covariance
+        xmt = torch.mean(target, 0, keepdim=True) - target
+        xct = xmt.t() @ xmt / (nt - 1)
+
+        # Frobenius norm
+        loss = torch.mean(torch.pow(xc - xct, 2))
+        # 或者是 sum 也可以，取决于你的 loss scale
+        # loss = torch.sum(torch.pow(xc - xct, 2)) / (4*d*d)
+
+        return loss
+
+
+class MMD_Alignment(nn.Module):
+    def __init__(self, kernel_mul=2.0, kernel_num=5, fix_sigma=None, **kwargs):
+        super(MMD_Alignment, self).__init__()
+        self.kernel_num = kernel_num
+        self.kernel_mul = kernel_mul
+        self.fix_sigma = fix_sigma
+
+    def guassian_kernel(self, source, target, kernel_mul, kernel_num, fix_sigma):
+        n_samples = int(source.size()[0]) + int(target.size()[0])
+        total = torch.cat([source, target], dim=0)
+
+        # 扩展维度以利用广播机制计算距离矩阵
+        total0 = total.unsqueeze(0).expand(
+            int(total.size(0)), int(total.size(0)), int(total.size(1)))
+        total1 = total.unsqueeze(1).expand(
+            int(total.size(0)), int(total.size(0)), int(total.size(1)))
+
+        L2_distance = ((total0 - total1) ** 2).sum(2)
+
+        if fix_sigma:
+            bandwidth = fix_sigma
+        else:
+            # 动态计算带宽 (Median Heuristic 的变体)
+            bandwidth = torch.sum(L2_distance.data) / (n_samples ** 2 - n_samples)
+
+        bandwidth /= kernel_mul ** (kernel_num // 2)
+        bandwidth_list = [bandwidth * (kernel_mul ** i) for i in range(kernel_num)]
+
+        # 多核加权求和
+        kernel_val = [torch.exp(-L2_distance / bandwidth_temp) for bandwidth_temp in bandwidth_list]
+        return sum(kernel_val)
+
+    def forward(self, source, target):
+        # 0. 异常处理：防止空数据导致报错
+        if source.size(0) == 0 or target.size(0) == 0:
+            return torch.tensor(0.0, device=source.device)
+
+        batch_size_src = int(source.size()[0])
+        batch_size_tgt = int(target.size()[0])
+
+        # 1. 计算联合核矩阵 K (Size: [N+M, N+M])
+        kernels = self.guassian_kernel(
+            source, target, kernel_mul=self.kernel_mul, kernel_num=self.kernel_num, fix_sigma=self.fix_sigma)
+
+        # 2. 将核矩阵切分为四个块
+        # XX: 源域内部相似度 (左上角)
+        XX = kernels[:batch_size_src, :batch_size_src]
+
+        # YY: 目标域内部相似度 (右下角)
+        YY = kernels[batch_size_src:, batch_size_src:]
+
+        # XY: 源域-目标域交叉相似度 (右上角)
+        XY = kernels[:batch_size_src, batch_size_src:]
+
+        # YX: 目标域-源域交叉相似度 (左下角)，其实等于 XY.T，但在计算 Mean 时可以直接用
+        YX = kernels[batch_size_src:, :batch_size_src]
+
+        # 3. 标准 MMD Loss 公式
+        # Loss = Mean(XX) + Mean(YY) - 2 * Mean(XY)
+        # 注意：这里假设 XY 和 YX 是对称的，所以减去 XY 和 YX 各一次
+        loss = torch.mean(XX) + torch.mean(YY) - torch.mean(XY) - torch.mean(YX)
+        # loss = torch.mean(- XY - YX)
+        # print("called!")
+        return loss
+
+
+import torch
+import torch.nn as nn
+
+
+class NCA_MMD_Alignment(nn.Module):
+    def __init__(self, kernel_mul=2.0, kernel_num=5, fix_sigma=None, **kwargs):
+        super(NCA_MMD_Alignment, self).__init__()
+        self.kernel_num = kernel_num
+        self.kernel_mul = kernel_mul
+        self.fix_sigma = fix_sigma
+
+    def compute_confidence_weights(self, inputs):
+        """
+        计算非单调置信度权重 (NCA)
+        inputs: tensor shape [N, 3], columns correspond to v, alpha, beta
+        """
+        # 1. 提取参数 (假设输入拼接顺序为 v, alpha, beta)
+        v = inputs[:, 0]
+        alpha = inputs[:, 1]
+        beta = inputs[:, 2]
+
+        # 2. 计算置信度 Phi
+        # 添加 epsilon 防止除零错误
+        eps = 1e-6
+        phi = 2 * v + alpha + 1.0 / (beta + eps)
+
+        # 3. 计算非单调权重 (高斯形状)
+        # 我们希望权重在 Phi 的分布中心(中等置信度)最高
+        # mu = phi.mean()  # 中心点
+        mu = 18
+        # sigma = phi.std() + eps  # 宽度
+        sigma = 8
+
+        # 高斯函数: exp(- (x - mu)^2 / (2*sigma^2))
+        weights = torch.exp(- (phi - mu) ** 2 / (2 * sigma ** 2))
+
+        # 4. 归一化权重，使其和为 1
+        # 这一步对于加权 MMD 很重要，类似于均值计算中的 1/N
+        weights = weights / (weights.sum() + eps)
+
+        return weights.detach()
+
+    def gaussian_kernel_weighted(self, source, target, source_weights, target_weights):
+        """
+        计算加权的高斯核矩阵和
+        """
+        n_source = int(source.size(0))
+        n_target = int(target.size(0))
+
+        # 拼接数据以统一计算距离矩阵
+        total = torch.cat([source, target], dim=0)
+
+        # 拼接权重
+        total_weights = torch.cat([source_weights, target_weights], dim=0)
+
+        # 计算 L2 距离矩阵
+        total0 = total.unsqueeze(0).expand(int(total.size(0)), int(total.size(0)), int(total.size(1)))
+        total1 = total.unsqueeze(1).expand(int(total.size(0)), int(total.size(0)), int(total.size(1)))
+        L2_distance = ((total0 - total1) ** 2).sum(2)
+
+        # 计算带宽 bandwidth
+        if self.fix_sigma:
+            bandwidth = self.fix_sigma
+        else:
+            # 使用中位数或平均距离作为基准带宽
+            bandwidth = torch.sum(L2_distance.data) / (total.size(0) ** 2 - total.size(0))
+
+        bandwidth /= self.kernel_mul ** (self.kernel_num // 2)
+        bandwidth_list = [bandwidth * (self.kernel_mul ** i) for i in range(self.kernel_num)]
+
+        # 计算多核高斯矩阵
+        kernel_val = [torch.exp(-L2_distance / bandwidth_temp) for bandwidth_temp in bandwidth_list]
+
+        # 叠加所有核矩阵
+        kernel_matrix = sum(kernel_val)  # Shape: [N_total, N_total]
+
+        # --- 核心修改：应用权重 ---
+        # 我们需要计算 W * K * W^T
+        # weight_matrix[i, j] = w_i * w_j
+        weight_matrix = torch.ger(total_weights, total_weights)  # Outer product
+
+        # 加权后的核矩阵
+        weighted_kernel_matrix = kernel_matrix * weight_matrix
+
+        # 提取各部分的损失
+        # XX: source-source, YY: target-target, XY: source-target
+        XX = weighted_kernel_matrix[:n_source, :n_source]
+        YY = weighted_kernel_matrix[n_source:, n_source:]
+        XY = weighted_kernel_matrix[:n_source, n_source:]
+        YX = weighted_kernel_matrix[n_source:, :n_source]
+
+        # MMD Loss = E[k(x,x)] + E[k(y,y)] - 2E[k(x,y)]
+        # 注意：因为权重已经归一化，这里直接求和即可，不需要再除以 N^2
+        # loss = torch.sum(XX) + torch.sum(YY) - torch.sum(XY) - torch.sum(YX)
+
+        loss = - torch.sum(XY) - torch.sum(YX)
+
+        return loss
+
+    def forward(self, source, target):
+        # source, target 形状为 [N, 3] (v, alpha, beta)
+
+        # 1. 计算源域和目标域的非单调权重
+        source_weights = self.compute_confidence_weights(source)
+        target_weights = self.compute_confidence_weights(target)
+
+        # 2. 计算加权 MMD 损失
+        loss = self.gaussian_kernel_weighted(source, target, source_weights, target_weights)
+
+        return loss
+
+
 def cross_domain_train(device, dataset, dataset_configs, hparams, backbone, data_path, src_id, tgt_id, run_id, logger):
-    # -------------------------------------------------------------------------
-    # 数据准备 (保持原逻辑)
-    # -------------------------------------------------------------------------
+
     dataset_file = torch.load(os.path.join(data_path, f"train_{tgt_id}.pt"))
     tgt_dataset = Load_Dataset(dataset_file, dataset_configs)
     tgt_train_dl = torch.utils.data.DataLoader(dataset=tgt_dataset, batch_size=hparams["batch_size"], shuffle=False,
@@ -123,7 +321,10 @@ def cross_domain_train(device, dataset, dataset_configs, hparams, backbone, data
     # 优化器与 Loss
     # -------------------------------------------------------------------------
     criterion = RMSELoss()
-    same_align_criterion = Stage_Wise_Alignment()
+    # same_align_criterion = Stage_Wise_Alignment()
+    # same_align_criterion = CoralAlignment()
+    same_align_criterion = NCA_MMD_Alignment()
+    # same_align_criterion = MMD_Alignment()
 
     target_optim = torch.optim.AdamW(target_encoder.parameters(), lr=hparams['learning_rate'], betas=(0.5, 0.9))
     scheduler = torch.optim.lr_scheduler.StepLR(target_optim, step_size=hparams['step_size'], gamma=hparams['lr_decay'])
@@ -195,6 +396,26 @@ def cross_domain_train(device, dataset, dataset_configs, hparams, backbone, data
                 # Phi = 2*nu + alpha + 1/beta
                 src_phi = compute_model_confidence(src_pos_v, src_pos_alpha, src_pos_beta) # [batch, 1]
                 tgt_phi = compute_model_confidence(tgt_v, tgt_alpha, tgt_beta)             # [batch, 1]
+                #
+                # import seaborn as sns
+                # import matplotlib.pyplot as plt
+                #
+                # # 确保已安装 seaborn: pip install seaborn
+                #
+                # # 假设要查看第 3 列 (索引为 2) 的分布
+                # column_index = 0
+                # column_data = src_phi.to('cpu').detach().numpy()[:, column_index]
+                #
+                # plt.figure(figsize=(8, 5))
+                # # 绘制 KDE 图
+                # sns.kdeplot(column_data, fill=True, color='skyblue')
+                # plt.title(f'维度数据分布 (KDE) - 第 {column_index} 列')
+                # plt.xlabel('数值')
+                # plt.ylabel('密度')
+                # plt.show()
+                #
+                # # print(list(tgt_phi.to('cpu').detach().numpy()), file=sys.stderr)
+                # print(tgt_phi.shape)
 
                 # logger.info(f'Source Phi - min: {src_phi.min().item():.4f}, max: {src_phi.max().item():.4f}, mean: {src_phi.mean().item():.4f}')
                 # logger.info(f'Target Phi - min: {tgt_phi.min().item():.4f}, max: {tgt_phi.max().item():.4f}, mean: {tgt_phi.mean().item():.4f}')
@@ -214,7 +435,7 @@ def cross_domain_train(device, dataset, dataset_configs, hparams, backbone, data
 
                 # D. 动态分支决策
                 # if batch_reliable_ratio > RELIABLE_RATIO_THRESHOLD:
-                if epoch > 20:
+                if epoch > 0:
                     # >>> 分支 1: 伪标签质量高 -> 执行精细的阶段对齐 (Stage-Wise) <<<
                     stage_align_count += 1
 
