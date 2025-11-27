@@ -30,6 +30,9 @@ class CMAPSS():
             "my_alg": {
                 "learning_rate": 3e-5,
             },
+            "GMM": {
+                "learning_rate": 3e-5,
+            },
         }
 
 

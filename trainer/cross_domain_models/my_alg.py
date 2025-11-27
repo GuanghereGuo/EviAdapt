@@ -7,7 +7,6 @@ import torch
 from torch import nn
 from torch.cuda.amp import autocast, GradScaler
 
-# 假设项目结构如下，根据实际情况调整 import 路径
 sys.path.append("..")
 from utils import *
 from data.mydataset import data_generator, Load_Dataset, stage_dataset_generator
@@ -321,9 +320,9 @@ def cross_domain_train(device, dataset, dataset_configs, hparams, backbone, data
     # 优化器与 Loss
     # -------------------------------------------------------------------------
     criterion = RMSELoss()
-    # same_align_criterion = Stage_Wise_Alignment()
+    same_align_criterion = Stage_Wise_Alignment()
     # same_align_criterion = CoralAlignment()
-    same_align_criterion = NCA_MMD_Alignment()
+    # same_align_criterion = NCA_MMD_Alignment()
     # same_align_criterion = MMD_Alignment()
 
     target_optim = torch.optim.AdamW(target_encoder.parameters(), lr=hparams['learning_rate'], betas=(0.5, 0.9))
@@ -389,7 +388,7 @@ def cross_domain_train(device, dataset, dataset_configs, hparams, backbone, data
                 tgt_DER = torch.cat((tgt_v, tgt_alpha, tgt_beta), dim=1)
 
                 # ============================================================
-                # 【核心改进：基于 Phi 的动态决策对齐】
+                # 改进：基于 Phi 的动态决策对齐
                 # ============================================================
 
                 # A. 计算置信度 Phi
@@ -400,7 +399,6 @@ def cross_domain_train(device, dataset, dataset_configs, hparams, backbone, data
                 # import seaborn as sns
                 # import matplotlib.pyplot as plt
                 #
-                # # 确保已安装 seaborn: pip install seaborn
                 #
                 # # 假设要查看第 3 列 (索引为 2) 的分布
                 # column_index = 0
